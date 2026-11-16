@@ -1,0 +1,41 @@
+name: Build Windows release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: x86_64-pc-windows-msvc
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Build release executable
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Rename executable
+        shell: pwsh
+        run: Copy-Item target\x86_64-pc-windows-msvc\release\zTranz.exe zTranz-windows-x64.exe
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: zTranz-windows-x64
+          path: zTranz-windows-x64.exe
+          if-no-files-found: error
