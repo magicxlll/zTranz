@@ -15,7 +15,7 @@ mod util;
 use std::sync::atomic::Ordering;
 use windows::Win32::UI::Input::KeyboardAndMouse::RegisterHotKey;
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, MSG, PeekMessageW, TranslateMessage, PM_REMOVE, WM_HOTKEY,
+    DispatchMessageW, GetMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE, WM_HOTKEY,
 };
 
 // Global hotkeys. Win+Shift so they rarely collide with apps.

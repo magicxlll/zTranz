@@ -5,12 +5,9 @@ use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::DataExchange::{
-    CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
-    CF_UNICODETEXT,
+    CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard, CF_UNICODETEXT,
 };
-use windows::Win32::System::Memory::{
-    GlobalLock, GlobalSize, GlobalUnlock, HGLOBAL,
-};
+use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock, HGLOBAL};
 
 /// Get the clipboard's current text, if any.
 pub fn get_text() -> Option<String> {
@@ -77,7 +74,11 @@ pub fn set_text(text: &str) -> bool {
         }
         std::ptr::copy_nonoverlapping(wide.as_mut_ptr(), dst, wide.len());
         let _ = GlobalUnlock(hg);
-        let ok = windows::Win32::System::DataExchange::SetClipboardData(CF_UNICODETEXT, Some(HANDLE(hg.0))).is_ok();
+        let ok = windows::Win32::System::DataExchange::SetClipboardData(
+            CF_UNICODETEXT,
+            Some(HANDLE(hg.0)),
+        )
+        .is_ok();
         ok
     }
 }
@@ -89,7 +90,7 @@ pub fn set_text(text: &str) -> bool {
 pub fn get_selection() -> Option<String> {
     unsafe {
         use windows::Win32::UI::Accessibility::{
-            IUIAutomationElement, UIA_TextPatternId, UIA_IsTextPatternAvailablePropertyId,
+            IUIAutomationElement, UIA_IsTextPatternAvailablePropertyId, UIA_TextPatternId,
         };
         use windows::Win32::UI::WindowsAndMessaging::{
             GetForegroundWindow, GetWindowThreadProcessId,
@@ -103,14 +104,14 @@ pub fn get_selection() -> Option<String> {
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
 
         let auto = IUIAutomationElement::RootElement().ok()?;
-        let cond = auto.CreatePropertyCondition(
-            UIA_IsTextPatternAvailablePropertyId,
-            windows::core::VARIANT::from(true),
-        ).ok()?;
-        let _ = &cond;
-        let el = auto
-            .ElementFromHandle(hwnd)
+        let cond = auto
+            .CreatePropertyCondition(
+                UIA_IsTextPatternAvailablePropertyId,
+                windows::core::VARIANT::from(true),
+            )
             .ok()?;
+        let _ = &cond;
+        let el = auto.ElementFromHandle(hwnd).ok()?;
         let _ = &el;
 
         // Walk down from the focused element to find a text pattern with a selection.
@@ -136,9 +137,7 @@ pub fn get_selection() -> Option<String> {
 unsafe fn selection_from(
     el: &windows::Win32::UI::Accessibility::IUIAutomationElement,
 ) -> Option<String> {
-    use windows::Win32::UI::Accessibility::{
-        IUIAutomationTextPattern, UIA_TextPatternId,
-    };
+    use windows::Win32::UI::Accessibility::{IUIAutomationTextPattern, UIA_TextPatternId};
     let pat = el.GetCurrentPattern(UIA_TextPatternId).ok()?;
     let tp: IUIAutomationTextPattern = pat.cast()?;
     let sel = tp.GetSelection().ok()?;

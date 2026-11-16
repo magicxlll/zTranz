@@ -33,14 +33,22 @@ impl Style {
     fn instruction(self) -> &'static str {
         match self {
             Style::Natural => "Translate into natural, idiomatic fluent text. Do not be literal.",
-            Style::Academic => "Translate into academic register. Preserve technical terminology \
-                              precisely, keep formal tone and complete sentences.",
-            Style::Tech => "Translate as a senior software engineer would: keep identifiers, code \
+            Style::Academic => {
+                "Translate into academic register. Preserve technical terminology \
+                              precisely, keep formal tone and complete sentences."
+            }
+            Style::Tech => {
+                "Translate as a senior software engineer would: keep identifiers, code \
                            snippets, API names and command lines untranslated, translate comments \
-                           and prose accurately.",
-            Style::Legal => "Translate as a legal professional. Preserve defined terms exactly, \
-                             keep modal verbs and obligations precise, do not add or drop clauses.",
-            Style::Short => "Translate concisely. Keep it short and to the point, preserving meaning.",
+                           and prose accurately."
+            }
+            Style::Legal => {
+                "Translate as a legal professional. Preserve defined terms exactly, \
+                             keep modal verbs and obligations precise, do not add or drop clauses."
+            }
+            Style::Short => {
+                "Translate concisely. Keep it short and to the point, preserving meaning."
+            }
         }
     }
 }
@@ -55,7 +63,9 @@ pub fn translate(text: &str, cfg: &Config) -> Result<String, String> {
         match translate_llm(text, cfg) {
             Ok(t) => return Ok(t),
             Err(e) => {
-                crate::util::log(&format!("LLM provider failed ({e}); falling back to Google"));
+                crate::util::log(&format!(
+                    "LLM provider failed ({e}); falling back to Google"
+                ));
             }
         }
     }
@@ -76,8 +86,8 @@ fn translate_google(text: &str, src: &str, dst: &str) -> Result<String, String> 
 }
 
 fn parse_google_json(body: &str) -> Result<String, String> {
-    let v: serde_json::Value = serde_json::from_str(body)
-        .map_err(|e| format!("bad response from translator: {e}"))?;
+    let v: serde_json::Value =
+        serde_json::from_str(body).map_err(|e| format!("bad response from translator: {e}"))?;
     let arr = v
         .get(0)
         .and_then(|x| x.as_array())
@@ -124,11 +134,18 @@ fn translate_llm(text: &str, cfg: &Config) -> Result<String, String> {
         "stream": false
     });
 
-    let url = format!("{}/chat/completions", cfg.llm_endpoint.trim_end_matches('/'));
-    let resp = http::post_json(&url, &body.to_string(), &[("Authorization".into(), format!("Bearer {}", cfg.llm_key))])?;
+    let url = format!(
+        "{}/chat/completions",
+        cfg.llm_endpoint.trim_end_matches('/')
+    );
+    let resp = http::post_json(
+        &url,
+        &body.to_string(),
+        &[("Authorization".into(), format!("Bearer {}", cfg.llm_key))],
+    )?;
 
-    let v: serde_json::Value = serde_json::from_str(&resp)
-        .map_err(|e| format!("bad LLM response: {e}"))?;
+    let v: serde_json::Value =
+        serde_json::from_str(&resp).map_err(|e| format!("bad LLM response: {e}"))?;
     if let Some(err) = v.get("error") {
         return Err(format!("LLM error: {}", err));
     }
@@ -165,7 +182,12 @@ pub fn detect_lang(sample: &str) -> String {
         return "auto".into();
     }
     // Vietnamese diacritics
-    if s.chars().any(|c| matches!(c, 'ă'|'â'|'đ'|'ê'|'ô'|'ơ'|'ư'|'à'|'á'|'ả'|'ã'|'ạ')) {
+    if s.chars().any(|c| {
+        matches!(
+            c,
+            'ă' | 'â' | 'đ' | 'ê' | 'ô' | 'ơ' | 'ư' | 'à' | 'á' | 'ả' | 'ã' | 'ạ'
+        )
+    }) {
         return "vi".into();
     }
     // CJK

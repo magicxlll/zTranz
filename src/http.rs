@@ -35,10 +35,7 @@ pub fn parse_url(url: &str) -> Result<Url, String> {
             h.to_string(),
             p.parse::<u16>().map_err(|_| format!("bad port in {url}"))?,
         ),
-        None => (
-            hostport.to_string(),
-            if secure { 443u16 } else { 80u16 },
-        ),
+        None => (hostport.to_string(), if secure { 443u16 } else { 80u16 }),
     };
     Ok(Url {
         host,
@@ -154,13 +151,8 @@ pub fn request(
         let mut chunk = [0u8; 8192];
         loop {
             let mut read: u32 = 0;
-            let ok = WinHttpReadData(
-                req.0,
-                chunk.as_mut_ptr(),
-                chunk.len() as u32,
-                &mut read,
-            )
-            .is_ok();
+            let ok =
+                WinHttpReadData(req.0, chunk.as_mut_ptr(), chunk.len() as u32, &mut read).is_ok();
             if !ok || read == 0 {
                 break;
             }
@@ -172,7 +164,12 @@ pub fn request(
 
         let text = String::from_utf8_lossy(&buf).to_string();
         if status >= 400 {
-            return Err(format!("HTTP {} from {}: {}", status, u.host, truncate(&text, 400)));
+            return Err(format!(
+                "HTTP {} from {}: {}",
+                status,
+                u.host,
+                truncate(&text, 400)
+            ));
         }
         Ok(text)
     }

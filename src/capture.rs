@@ -20,8 +20,8 @@ pub struct ScreenGeometry {
 pub fn virtual_screen() -> ScreenGeometry {
     unsafe {
         ScreenGeometry {
-            x: GetSystemMetrics(76).try_into().unwrap_or(0),  // SM_XVIRTUALSCREEN
-            y: GetSystemMetrics(77).try_into().unwrap_or(0),  // SM_YVIRTUALSCREEN
+            x: GetSystemMetrics(76).try_into().unwrap_or(0), // SM_XVIRTUALSCREEN
+            y: GetSystemMetrics(77).try_into().unwrap_or(0), // SM_YVIRTUALSCREEN
             width: GetSystemMetrics(78).try_into().unwrap_or(1920), // SM_CXVIRTUALSCREEN
             height: GetSystemMetrics(79).try_into().unwrap_or(1080), // SM_CYVIRTUALSCREEN
         }
@@ -98,7 +98,11 @@ pub fn grab_virtual_screen() -> Result<RawScreen, String> {
 
 /// Crop a region (virtual-screen coordinates) out of a raw screen grab and
 /// write it to `out` as a PNG.
-pub fn crop_to_png(src: &RawScreen, region: (i32, i32, i32, i32), out: &Path) -> Result<(), String> {
+pub fn crop_to_png(
+    src: &RawScreen,
+    region: (i32, i32, i32, i32),
+    out: &Path,
+) -> Result<(), String> {
     let (rx, ry, rw, rh) = region;
     let sw = src.geom.width;
     let sh = src.geom.height;

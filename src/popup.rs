@@ -12,8 +12,8 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, PostMessageW, RegisterClassW, SetForegroundWindow,
-    SetWindowPos, ShowWindow, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
-    HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_SHOW,
+    SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_SHOW,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 use crate::util::wide;
@@ -101,7 +101,9 @@ impl Popup {
                 self.hwnd,
                 None,
                 None,
-                windows::Win32::UI::WindowsAndMessaging::REDRAW_WINDOW_FLAGS(0x0001 | 0x0004 | 0x0080),
+                windows::Win32::UI::WindowsAndMessaging::REDRAW_WINDOW_FLAGS(
+                    0x0001 | 0x0004 | 0x0080,
+                ),
             );
         }
     }
@@ -218,7 +220,11 @@ unsafe fn draw_content(hdc: windows::Win32::Graphics::Gdi::HDC, rc: &RECT) {
         let _ = DeleteObject(Some(&brush));
 
         let _ = SetTextColor(hdc, COLORREF(0x00404040));
-        let mut buf: Vec<u16> = content.status.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut buf: Vec<u16> = content
+            .status
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
         let _ = TextOutW(hdc, left + 8, rc.bottom - 27, &mut buf);
     }
 }

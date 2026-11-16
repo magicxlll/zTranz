@@ -3,7 +3,7 @@ use serde_json::Value;
 pub struct Config {
     pub source_lang: String,
     pub target_lang: String,
-    pub provider: String, // "google" | "llm"
+    pub provider: String,     // "google" | "llm"
     pub llm_endpoint: String, // OpenAI-compatible base, e.g. https://api.openai.com/v1
     pub llm_model: String,
     pub llm_key: String,
@@ -39,7 +39,10 @@ impl Config {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let _ = std::fs::write(&path, serde_json::to_string_pretty(self).unwrap_or_default());
+        let _ = std::fs::write(
+            &path,
+            serde_json::to_string_pretty(self).unwrap_or_default(),
+        );
     }
 
     fn merge(mut self, v: Value) -> Self {

@@ -8,8 +8,8 @@ use windows::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_MODIFY, NOTIFYICONDATAW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, PostMessageW, RegisterClassW, SetForegroundWindow,
-    WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, PostMessageW, RegisterClassW,
+    SetForegroundWindow, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 
 pub const WM_TRAY: u32 = 0x8000 + 1;
@@ -72,10 +72,7 @@ impl Tray {
                 return Err("Shell_NotifyIcon failed".into());
             }
 
-            Ok(Tray {
-                hwnd,
-                _icon: icon,
-            })
+            Ok(Tray { hwnd, _icon: icon })
         }
     }
 
@@ -103,10 +100,7 @@ impl Tray {
                 uID: 1,
                 ..Default::default()
             };
-            let _ = Shell_NotifyIconW(
-                windows::Win32::UI::Shell::NIM_DELETE,
-                &nid,
-            );
+            let _ = Shell_NotifyIconW(windows::Win32::UI::Shell::NIM_DELETE, &nid);
             let _ = DestroyWindow(self.hwnd);
         }
     }
@@ -150,7 +144,14 @@ unsafe fn make_icon() -> windows::Win32::UI::WindowsAndMessaging::HICON {
         Err(_) => return windows::Win32::UI::WindowsAndMessaging::HICON(std::ptr::null_mut()),
     };
     let mut bits: *mut u8 = std::ptr::null_mut();
-    let hbm = match CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &mut bits as *mut *mut u8 as *mut _, None, 0) {
+    let hbm = match CreateDIBSection(
+        dc,
+        &bi,
+        DIB_RGB_COLORS,
+        &mut bits as *mut *mut u8 as *mut _,
+        None,
+        0,
+    ) {
         Ok(b) => b,
         Err(_) => return windows::Win32::UI::WindowsAndMessaging::HICON(std::ptr::null_mut()),
     };
@@ -167,7 +168,8 @@ unsafe fn make_icon() -> windows::Win32::UI::WindowsAndMessaging::HICON {
             if d < size as f32 / 2.0 - 1.0 {
                 let (mut r, mut g, mut b) = (46u8, 134u8, 222u8);
                 // A vertical + horizontal bar forming a "T".
-                let in_t = (x > 7 && x < 25 && y > 9 && y < 13) || (x > 14 && x < 18 && y > 9 && y < 23);
+                let in_t =
+                    (x > 7 && x < 25 && y > 9 && y < 13) || (x > 14 && x < 18 && y > 9 && y < 23);
                 if in_t {
                     r = 255;
                     g = 255;
@@ -249,8 +251,8 @@ unsafe extern "system" fn tray_proc(
 
 unsafe fn show_menu(hwnd: HWND) {
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreatePopupMenu, GetCursorPos, SetForegroundWindow, TrackPopupMenu,
-        MF_STRING, TPM_RIGHTBUTTON, TPM_RETURNCMD,
+        CreatePopupMenu, GetCursorPos, SetForegroundWindow, TrackPopupMenu, MF_STRING,
+        TPM_RETURNCMD, TPM_RIGHTBUTTON,
     };
     let menu = match CreatePopupMenu() {
         Ok(m) => m,
@@ -268,7 +270,8 @@ unsafe fn show_menu(hwnd: HWND) {
         ID_CAPTURE as usize,
         windows::core::PCWSTR(w!("Capture screen region...").as_ptr()),
     );
-    let _ = windows::Win32::UI::WindowsAndMessaging::AppendMenuW(menu, MF_STRING, 0, PCWSTR::null());
+    let _ =
+        windows::Win32::UI::WindowsAndMessaging::AppendMenuW(menu, MF_STRING, 0, PCWSTR::null());
     let _ = windows::Win32::UI::WindowsAndMessaging::AppendMenuW(
         menu,
         MF_STRING,
@@ -279,7 +282,15 @@ unsafe fn show_menu(hwnd: HWND) {
     let mut pt = POINT::default();
     let _ = GetCursorPos(&mut pt);
     let _ = SetForegroundWindow(hwnd);
-    let cmd = TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_RETURNCMD, pt.x, pt.y, 0, hwnd, None);
+    let cmd = TrackPopupMenu(
+        menu,
+        TPM_RIGHTBUTTON | TPM_RETURNCMD,
+        pt.x,
+        pt.y,
+        0,
+        hwnd,
+        None,
+    );
     let _ = DestroyWindow(menu);
 
     match cmd.0 as u16 {

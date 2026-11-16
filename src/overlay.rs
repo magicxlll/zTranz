@@ -9,8 +9,8 @@ use std::cell::RefCell;
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetClientRect, GetDC,
-    ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetClientRect, GetDC, ReleaseDC,
+    SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -172,12 +172,7 @@ fn selection() -> (i32, i32, i32, i32) {
         let st = s.borrow();
         let (ax, ay) = st.start;
         let (bx, by) = st.cur;
-        (
-            ax.min(bx),
-            ay.min(by),
-            ax.abs_diff(bx),
-            ay.abs_diff(by),
-        )
+        (ax.min(bx), ay.min(by), ax.abs_diff(bx), ay.abs_diff(by))
     })
 }
 
@@ -268,21 +263,12 @@ fn build_overlay_pixels(width: i32, height: i32, sel: (i32, i32, i32, i32)) -> V
             let cx = col as i32;
             let cy = row as i32;
 
-            let in_sel = sw > 0
-                && sh > 0
-                && cx >= sx
-                && cx < sx + sw
-                && cy >= sy
-                && cy < sy + sh;
+            let in_sel = sw > 0 && sh > 0 && cx >= sx && cx < sx + sw && cy >= sy && cy < sy + sh;
 
-            let near_edge = sw > 0
-                && sh > 0
-                && cx >= sx - 1
-                && cx <= sx + sw
-                && cy >= sy - 1
-                && cy <= sy + sh;
-            let on_edge = near_edge
-                && (cx == sx - 1 || cx == sx + sw || cy == sy - 1 || cy == sy + sh);
+            let near_edge =
+                sw > 0 && sh > 0 && cx >= sx - 1 && cx <= sx + sw && cy >= sy - 1 && cy <= sy + sh;
+            let on_edge =
+                near_edge && (cx == sx - 1 || cx == sx + sw || cy == sy - 1 || cy == sy + sh);
 
             if on_edge {
                 // Marching ants.
