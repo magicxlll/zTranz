@@ -56,8 +56,14 @@ Xây dựng **zTranz: ứng dụng dịch mọi nơi trên Windows**. Người d
 ## Trạng thái phiên gần nhất
 
 - Đã xác định lỗi định hướng: trước đó một agent đã nhầm `ScreenCapReplay-plan.md` là kế hoạch chính và kết luận sai về app ghi màn hình.
-- Chưa thay đổi mã nguồn Rust trong phiên xác định nhầm lẫn.
-- Cần làm tiếp: xác lập spec/plan/task chính cho zTranz, kiểm tra repo/git remote, làm cho build/test có thể chạy, rồi hoàn thiện các luồng dịch cốt lõi.
+- Đã tạo tài liệu nguồn: `PROJECT_MEMORY.md`, `MEMORY.md`, `SPEC.md`, `PLAN.md`, `TASKS.md`.
+- Đã khởi tạo Git repository tại thư mục dự án (branch `main`), đặt tác giả `PHAN VIET <vietph@Zit-M4.local>` (khớp các repo cùng Workspace), thêm `.gitignore` (loại `target/`, `ztranz_rust_recovered/`), tạo baseline commit `0283440`.
+- Đã thêm remote `origin = https://github.com/magicxlll/zTranz.git` (repo remote hiện trống, chưa có branch nào).
+- Push tới GitHub **chưa thành công**: thiếu thông tin xác thực (`fatal: unable to get password from user`). Cần token/SSH credentials của GitHub cho repo `magicxlll/zTranz` (ghi rõ: chưa push được, chưa xác minh remote nhận mã nguồn).
+- Toolchain Rust có sẵn: `cargo 1.97.0`, `rustc 1.97.0` (tại `~/.cargo/bin`, không có trên PATH mặc định — dùng `export PATH="$HOME/.cargo/bin:$PATH"`).
+- Dự án là app Windows thuần (crate `windows` 0.62.2 + Win32 API: RegisterHotKey, UpdateLayeredWindow, Windows.Media.Ocr). Host hiện tại là macOS (Apple Silicon), nên build native không đại diện cho build Windows; cần cross-compile hoặc build trên host Windows.
+- Đã chạy `PATH="$HOME/.cargo/bin:$PATH" cargo check`; thất bại ở dependency `windows-future 0.3.2` với lỗi thiếu `windows_core::imp::{IMarshal, marshaler}` và `windows_threading::submit` trên host macOS. Chưa được phép kết luận mã nguồn zTranz có lỗi compile Windows; cần chạy `cargo check --target <Windows target>` trên toolchain/host Windows và/hoặc rà lại feature/version của crate `windows`.
+- Thư mục `target/` chiếm ~3.4 GB (artifacts cũ), đã được `.gitignore` loại khỏi git.
 
 ## Bài học kinh nghiệm
 
