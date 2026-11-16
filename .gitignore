@@ -1,0 +1,15 @@
+# Build output
+/target
+
+# Local logs & temp
+*.log
+*.tmp
+__pycache__/
+
+# Recovered/experimental source tree (not part of the zTranz app)
+ztranz_rust_recovered/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
