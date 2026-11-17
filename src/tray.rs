@@ -1,6 +1,5 @@
 //! System tray icon with a right-click menu.
 
-use std::cell::RefCell;
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -8,8 +7,8 @@ use windows::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_MODIFY, NOTIFYICONDATAW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, PostMessageW, RegisterClassW,
-    SetForegroundWindow, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW, WNDCLASSW, WS_EX_TOOLWINDOW,
+    WS_POPUP,
 };
 
 pub const WM_TRAY: u32 = 0x8000 + 1;
@@ -17,7 +16,6 @@ pub const WM_TRAY: u32 = 0x8000 + 1;
 const ID_TRANSLATE: u16 = 1001;
 const ID_CAPTURE: u16 = 1002;
 const ID_QUIT: u16 = 1003;
-const ID_STATUS: u16 = 1004;
 
 pub struct Tray {
     hwnd: HWND,
@@ -34,6 +32,7 @@ impl Tray {
                 lpfnWndProc: Some(tray_proc),
                 hInstance: hinst.into(),
                 lpszClassName: PCWSTR(class_name.as_ptr()),
+                hbrBackground: windows::Win32::Graphics::Gdi::HBRUSH::default(),
                 ..Default::default()
             };
             let _ = RegisterClassW(&wc);
@@ -132,20 +131,16 @@ unsafe fn make_icon() -> windows::Win32::UI::WindowsAndMessaging::HICON {
             biHeight: -size * 2,
             biPlanes: 1,
             biBitCount: 32,
-            biCompression: BI_RGB,
+            biCompression: BI_RGB.0,
             ..Default::default()
         },
-        bmiColors: [0],
+        bmiColors: [windows::Win32::Graphics::Gdi::RGBQUAD::default()],
     };
 
-    let screen_dc = windows::Win32::Graphics::Gdi::GetDC(None);
-    let dc = match screen_dc {
-        Ok(d) => d,
-        Err(_) => return windows::Win32::UI::WindowsAndMessaging::HICON(std::ptr::null_mut()),
-    };
+    let dc = windows::Win32::Graphics::Gdi::GetDC(None);
     let mut bits: *mut u8 = std::ptr::null_mut();
     let hbm = match CreateDIBSection(
-        dc,
+        Some(dc),
         &bi,
         DIB_RGB_COLORS,
         &mut bits as *mut *mut u8 as *mut _,
@@ -153,9 +148,12 @@ unsafe fn make_icon() -> windows::Win32::UI::WindowsAndMessaging::HICON {
         0,
     ) {
         Ok(b) => b,
-        Err(_) => return windows::Win32::UI::WindowsAndMessaging::HICON(std::ptr::null_mut()),
+        Err(_) => {
+            let _ = windows::Win32::Graphics::Gdi::ReleaseDC(None, dc);
+            return windows::Win32::UI::WindowsAndMessaging::HICON(std::ptr::null_mut());
+        }
     };
-    let old = SelectObject(dc, hbm);
+    let old = SelectObject(dc, hbm.into());
 
     // Draw: blue circle on transparent background, with a lighter "T".
     let n = (size * size) as usize;
@@ -192,16 +190,19 @@ unsafe fn make_icon() -> windows::Win32::UI::WindowsAndMessaging::HICON {
     }
 
     let icon_info = windows::Win32::UI::WindowsAndMessaging::ICONINFO {
-        fIcon: true,
+        fIcon: true.into(),
         xHotspot: 0,
         yHotspot: 0,
         hbmMask: CreateBitmap(size, size, 1, 1, None),
         hbmColor: hbm,
     };
-    let hicon = CreateIconIndirect(&icon_info);
+    let hicon = match CreateIconIndirect(&icon_info) {
+        Ok(h) => h,
+        Err(_) => windows::Win32::UI::WindowsAndMessaging::HICON(std::ptr::null_mut()),
+    };
 
     SelectObject(dc, old);
-    let _ = windows::Win32::Graphics::Gdi::DeleteObject(Some(&hbm));
+    let _ = windows::Win32::Graphics::Gdi::DeleteObject(hbm.into());
     let _ = windows::Win32::Graphics::Gdi::ReleaseDC(None, dc);
     hicon
 }
@@ -287,11 +288,11 @@ unsafe fn show_menu(hwnd: HWND) {
         TPM_RIGHTBUTTON | TPM_RETURNCMD,
         pt.x,
         pt.y,
-        0,
+        None,
         hwnd,
         None,
     );
-    let _ = DestroyWindow(menu);
+    let _ = windows::Win32::UI::WindowsAndMessaging::DestroyMenu(menu);
 
     match cmd.0 as u16 {
         ID_TRANSLATE => crate::main_dispatch::on_translate_requested(),

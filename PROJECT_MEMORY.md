@@ -126,6 +126,49 @@ Xây dựng **zTranz: ứng dụng dịch mọi nơi trên Windows**. Người d
   - Mac đang là macOS Apple Silicon: `cargo check` local đã thất bại ở dependency `windows-future 0.3.2` (thiếu `windows_core::imp::{IMarshal, marshaler}` và `windows_threading::submit`) — không đại diện cho build Windows; chỉ kết luận sau khi chạy trên Desktop.
   - Git: baseline đã có (`0283440`), remote `origin` là `https://github.com/magicxlll/zTranz.git` nhưng **chưa push được** (thiếu credentials). Cần token/SSH key.
 
+## SỰ KIỆN THEN CHỐT — BUILD WINDOWS THẬT THÀNH CÔNG — 2026-11-17
+
+Phiên này **chạy build thật trên máy Windows thật** (không qua runner/SSH) và thành công. Kết quả ghi lại trung thực:
+
+### Trạng thái toolchain (đã xác nhận chạy được)
+
+- Rust **1.100.0** / cargo 1.100.0 đã cài (`~/.cargo/bin`), host target mặc định `x86_64-pc-windows-gnu`.
+- Target **`x86_64-pc-windows-msvc`** đã thêm và hoạt động. MSVC Build Tools 18 (`C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools`) có sẵn; link.exe x64 OK.
+- Đã thêm component `rustfmt` (ban đầu thiếu → `cargo fmt` lỗi).
+- Helper build: `scripts/run-msvc.cmd` (call `vcvarsall.bat x64`, thêm `~/.cargo/bin` vào PATH, rồi chạy `cargo %*`). Gọi dạng `cmd //c "scripts\run-msvc.cmd build --release --target x86_64-pc-windows-msvc"`.
+
+### Nguyên nhân gốc của 82 lỗi compile (và cách sửa)
+
+- Mã nguồn viết theo **API layout của `windows` crate đời cũ**, trong khi `Cargo.toml`/`Cargo.lock` pin **`windows 0.62.2`**. Đây là port hệ thống, không phải lỗi logic.
+- Giữ nguyên pin `0.62.2` (deterministic, có sẵn registry cache) và **port các call site** sang ký hiệu 0.62.2. Các thay đổi chính:
+  - `Cargo.toml`: thêm feature WinRT `Graphics_Imaging` (cho `Graphics::Imaging`/`Media_Ocr` pipeline), thêm dependency `serde` (không default-features).
+  - Hàm đổi module/kiểu trong 0.62.2: `GetClientRect`/`GetCursorPos` → `WindowsAndMessaging`; `RedrawWindow`/`REDRAW_WINDOW_FLAGS` → `Graphics::Gdi`; `INFINITE` → `System::Threading`; `CreateCompatibleDC`/`GetDC` trả `HDC` trực tiếp (không `Result`); `SelectObject`/`DeleteObject` nhận `HGDIOBJ` (dùng `.into()`); `RegisterHotKey` nhận `HOT_KEY_MODIFIERS` (typed const); `PostMessageW`/`RedrawWindow` nhận `Option<HWND>`; `MsgWaitForMultipleObjectsEx` chỉ 4 tham số (loại `INFINITE`).
+  - `IOutputStream::WriteBytes` **bị gỡ** trong 0.62.2 → viết lại `ocr.rs` đọc PNG trực tiếp qua `StorageFile::GetFileFromPathAsync` + `OpenAsync` (tránh copy byte vào stream memory).
+  - `BSTR` (UIAutomation `GetText`) không có `to_string_lossy` → dùng `String::from_utf16_lossy(t.as_ref())`.
+  - Sửa static không const (`state.rs` `Mutex<String>` khởi tạo rỗng), `static mut` dùng `&raw const` (loại warning `static_mut_refs`).
+  - **Lỗi hotkey conflict không crash app nữa**: `register_hotkeys` từng `return Err` khi 1 hotkey đã bị app khác giữ (vd SnippingTool giữ Win+Shift+C) → giờ chỉ log warning và bỏ qua phím đó; tray menu vẫn dùng được. `util::log` cũng tự tạo thư mục log.
+
+### Kết quả build/test thật (đã chạy, không suy đoán)
+
+- `cargo check --target x86_64-pc-windows-msvc`: **0 lỗi, 0 warning** (ban đầu 82 lỗi).
+- `cargo test --target x86_64-pc-windows-msvc`: ok (0 test — crate chưa có unit test).
+- `scripts/test-windows.ps1 -Profile release`: **PASS** — artifact `artifacts/zTranz-windows-x64-release.exe` (~328 KB).
+- Chạy trực tiếp `zTranz.exe`: app khởi động, tạo tray, log hotkey conflict, **chạy liên tục không crash**.
+- **OCR pipeline xác nhận chạy thật**: tạo probe crate riêng (`ocr_probe/`, ngoài dự án) render chữ bằng GDI+ rồi chạy đúng `ocr_pipeline` của `src/ocr.rs` → nhận đúng "The quick brown fox 12345". Chứng tỏ WinRT `join()` blocking path hoạt động trên worker thread trong build release.
+
+### File đã đổi trong phiên này
+
+- Source: `src/{capture,clipboard,config,http,main,main_dispatch,ocr,overlay,popup,state,tray,util}.rs`
+- `Cargo.toml`, `Cargo.lock`, `.gitignore` (bỏ `/artifacts`), `scripts/run-msvc.cmd`, `scripts/msvc-env.cmd`.
+- Probe riêng (không commit vào dự án): `ocr_probe/` — chỉ để xác minh OCR.
+
+### Hạn chế / chưa làm (ghi thẳng, không phóng đại)
+
+- **Chưa test đầy đủ GUI tương tác** (drag overlay chọn vùng, click tray, popup) trong phiên này — mới chạy được đến mức "app khởi động ổn định + OCR pipeline OK". Cần người dùng test GUI tay.
+- **Chưa xác nhận mạng/provider**: chưa gọi thật Google Translate / LLM endpoint (cần key + mạng). Lỗi mạng chưa smoke test.
+- Chưa có unit test; `cargo test` chỉ build không chạy test nào.
+- `config.save()` hiện chỉ `#[allow(dead_code)]` — chưa có UI settings để lưu config.
+
 ## HƯỚNG DẪN CHO PHIÊN SAU (PROMPT HANDOFF)
 
 > **Prompt gợi ý để AI phiên sau copy/dùng (điều chỉnh tên người dùng nếu cần):**

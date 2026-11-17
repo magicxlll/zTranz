@@ -6,18 +6,20 @@ use std::cell::RefCell;
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, GetClientRect,
-    GetTextExtentPoint32W, SetBkColor, SetTextColor, TextOutW, COLOR_WINDOW as GDI_COLOR_WINDOW,
+    BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, GetSysColor,
+    GetTextExtentPoint32W, RedrawWindow, SetBkColor, SetTextColor, TextOutW,
+    COLOR_WINDOW as GDI_COLOR_WINDOW, RDW_ALLCHILDREN, RDW_ERASE, RDW_VALIDATE,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, PostMessageW, RegisterClassW, SetForegroundWindow,
-    SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_SHOW,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, GetClientRect, GetCursorPos, PostMessageW, RegisterClassW,
+    SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW,
+    SW_SHOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 use crate::util::wide;
 
+#[derive(Clone)]
 pub struct PopupContent {
     pub source: String,
     pub translated: String,
@@ -46,11 +48,12 @@ impl Popup {
             let class_name = w!("zTranzPopupClass");
             let hinst = GetModuleHandleW(None).map_err(|e| format!("GetModuleHandle: {e}"))?;
 
+            let window_bg = COLORREF(GetSysColor(GDI_COLOR_WINDOW));
             let wc = windows::Win32::UI::WindowsAndMessaging::WNDCLASSW {
                 lpfnWndProc: Some(wnd_proc),
                 hInstance: hinst.into(),
                 lpszClassName: PCWSTR(class_name.as_ptr()),
-                hbrBackground: CreateSolidBrush(GDI_COLOR_WINDOW),
+                hbrBackground: CreateSolidBrush(window_bg),
                 ..Default::default()
             };
             // Ignore "already registered" errors.
@@ -80,7 +83,7 @@ impl Popup {
         set_content(content);
         unsafe {
             let mut pt = POINT { x: 0, y: 0 };
-            let _ = windows::Win32::UI::Input::KeyboardAndMouse::GetCursorPos(&mut pt);
+            let _ = GetCursorPos(&mut pt);
 
             let (w, h) = (560i32, 360i32);
             let x = (pt.x - w / 2).max(8);
@@ -97,13 +100,12 @@ impl Popup {
             );
             let _ = ShowWindow(self.hwnd, SW_SHOW);
             let _ = SetForegroundWindow(self.hwnd);
-            let _ = windows::Win32::UI::WindowsAndMessaging::RedrawWindow(
-                self.hwnd,
+            // RDW_VALIDATE | RDW_ERASE | RDW_ALLCHILDREN
+            let _ = RedrawWindow(
+                Some(self.hwnd),
                 None,
                 None,
-                windows::Win32::UI::WindowsAndMessaging::REDRAW_WINDOW_FLAGS(
-                    0x0001 | 0x0004 | 0x0080,
-                ),
+                RDW_VALIDATE | RDW_ERASE | RDW_ALLCHILDREN,
             );
         }
     }
@@ -112,10 +114,6 @@ impl Popup {
         unsafe {
             let _ = ShowWindow(self.hwnd, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
         }
-    }
-
-    pub fn hwnd(&self) -> HWND {
-        self.hwnd
     }
 }
 
@@ -138,10 +136,10 @@ unsafe extern "system" fn wnd_proc(
                     // Copy translated text
                     let t = CONTENT.with(|c| c.borrow().translated.clone());
                     crate::clipboard::set_text(&t);
-                    let _ = PostMessageW(hwnd, 0x0010, WPARAM(0), LPARAM(0));
+                    let _ = PostMessageW(Some(hwnd), 0x0010, WPARAM(0), LPARAM(0));
                 }
                 2 => {
-                    let _ = PostMessageW(hwnd, 0x0010, WPARAM(0), LPARAM(0));
+                    let _ = PostMessageW(Some(hwnd), 0x0010, WPARAM(0), LPARAM(0));
                 }
                 _ => {}
             }
@@ -154,9 +152,9 @@ unsafe extern "system" fn wnd_proc(
             let mut rc = RECT::default();
             let _ = GetClientRect(hwnd, &mut rc);
 
-            let brush = CreateSolidBrush(GDI_COLOR_WINDOW);
+            let brush = CreateSolidBrush(COLORREF(GetSysColor(GDI_COLOR_WINDOW)));
             let _ = FillRect(hdc, &rc, brush);
-            let _ = DeleteObject(Some(&brush));
+            let _ = DeleteObject(brush.into());
 
             draw_content(hdc, &rc);
             let _ = EndPaint(hwnd, &ps);
@@ -165,7 +163,7 @@ unsafe extern "system" fn wnd_proc(
         0x0100 => {
             // WM_KEYDOWN — Esc closes
             if wparam.0 == 0x1B {
-                let _ = PostMessageW(hwnd, 0x0010, WPARAM(0), LPARAM(0));
+                let _ = PostMessageW(Some(hwnd), 0x0010, WPARAM(0), LPARAM(0));
             }
             LRESULT(0)
         }
@@ -176,7 +174,7 @@ unsafe extern "system" fn wnd_proc(
 unsafe fn draw_content(hdc: windows::Win32::Graphics::Gdi::HDC, rc: &RECT) {
     let content = CONTENT.with(|c| c.borrow().clone());
 
-    let _ = SetBkColor(hdc, GDI_COLOR_WINDOW);
+    let _ = SetBkColor(hdc, COLORREF(GetSysColor(GDI_COLOR_WINDOW)));
     let _ = SetTextColor(hdc, COLORREF(0x001A1A1A));
 
     let left = 16;
@@ -197,7 +195,7 @@ unsafe fn draw_content(hdc: windows::Win32::Graphics::Gdi::HDC, rc: &RECT) {
         bottom: y + 1,
     };
     let _ = FillRect(hdc, &line, pen);
-    let _ = DeleteObject(Some(&pen));
+    let _ = DeleteObject(pen.into());
     y += 12;
 
     // Source text (grey)
@@ -205,7 +203,7 @@ unsafe fn draw_content(hdc: windows::Win32::Graphics::Gdi::HDC, rc: &RECT) {
     y += 6;
 
     // Translated text (dark)
-    y = draw_wrapped(hdc, left, y, width, &content.translated, 0x001A1A1A, 8);
+    let _ = draw_wrapped(hdc, left, y, width, &content.translated, 0x001A1A1A, 8);
 
     // Status bar
     if !content.status.is_empty() {
@@ -217,7 +215,7 @@ unsafe fn draw_content(hdc: windows::Win32::Graphics::Gdi::HDC, rc: &RECT) {
         };
         let brush = CreateSolidBrush(COLORREF(0x00F2F2F2));
         let _ = FillRect(hdc, &status, brush);
-        let _ = DeleteObject(Some(&brush));
+        let _ = DeleteObject(brush.into());
 
         let _ = SetTextColor(hdc, COLORREF(0x00404040));
         let mut buf: Vec<u16> = content

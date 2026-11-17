@@ -5,10 +5,10 @@
 use windows::core::PCWSTR;
 use windows::Win32::Networking::WinHttp::{
     WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest, WinHttpQueryHeaders,
-    WinHttpReadData, WinHttpReceiveResponse, WinHttpSendRequest, HINTERNET,
-    WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+    WinHttpReadData, WinHttpReceiveResponse, WinHttpSendRequest,
+    WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_OPEN_REQUEST_FLAGS, WINHTTP_QUERY_FLAG_NUMBER,
+    WINHTTP_QUERY_STATUS_CODE,
 };
-use windows::Win32::WinHttp::{WINHTTP_HEADER_NAME_BY_INDEX, WINHTTP_QUERY_FLAG_NUMBER};
 
 pub struct Url {
     pub host: String,
@@ -45,13 +45,22 @@ pub fn parse_url(url: &str) -> Result<Url, String> {
     })
 }
 
-struct Session(HINTERNET);
+/// WinHttp handles are raw `HINTERNET` pointers.
+struct Session(*mut std::ffi::c_void);
 
 impl Drop for Session {
     fn drop(&mut self) {
         unsafe {
             let _ = WinHttpCloseHandle(self.0);
         }
+    }
+}
+
+fn open_or_err(ptr: *mut std::ffi::c_void, what: &str) -> Result<Session, String> {
+    if ptr.is_null() {
+        Err(format!("{what} failed"))
+    } else {
+        Ok(Session(ptr))
     }
 }
 
@@ -66,37 +75,42 @@ pub fn request(
 
     unsafe {
         let agent: Vec<u16> = "zTranz/0.1\0".encode_utf16().collect();
-        let h = WinHttpOpen(
-            PCWSTR(agent.as_ptr()),
-            WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
-            PCWSTR::null(),
-            PCWSTR::null(),
-            0,
-        );
-        let h = match h {
-            Ok(h) => Session(h),
-            Err(e) => return Err(format!("WinHttpOpen failed: {e}")),
+        let secure_flag = if u.secure {
+            WINHTTP_OPEN_REQUEST_FLAGS(8) // WINHTTP_FLAG_SECURE
+        } else {
+            WINHTTP_OPEN_REQUEST_FLAGS(0)
         };
+        let h = open_or_err(
+            WinHttpOpen(
+                PCWSTR(agent.as_ptr()),
+                WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                PCWSTR::null(),
+                PCWSTR::null(),
+                0,
+            ),
+            "WinHttpOpen",
+        )?;
 
         let host: Vec<u16> = format!("{}\0", u.host).encode_utf16().collect();
-        let conn = WinHttpConnect(h.0, &host, u.port, 0)
-            .map_err(|e| format!("WinHttpConnect failed: {e}"))?;
-        let conn = Session(conn);
+        let conn = open_or_err(
+            WinHttpConnect(h.0, PCWSTR(host.as_ptr()), u.port, 0),
+            "WinHttpConnect",
+        )?;
 
         let path: Vec<u16> = format!("{}\0", u.path_and_query).encode_utf16().collect();
         let verb: Vec<u16> = format!("{}\0", method).encode_utf16().collect();
-        let req = WinHttpOpenRequest(
-            conn.0,
-            PCWSTR(verb.as_ptr()),
-            PCWSTR(path.as_ptr()),
-            PCWSTR::null(),
-            PCWSTR::null(),
-            PCWSTR::null(),
-            0,
-            0,
-        )
-        .map_err(|e| format!("WinHttpOpenRequest failed: {e}"))?;
-        let req = Session(req);
+        let req = open_or_err(
+            WinHttpOpenRequest(
+                conn.0,
+                PCWSTR(verb.as_ptr()),
+                PCWSTR(path.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                std::ptr::null(),
+                secure_flag,
+            ),
+            "WinHttpOpenRequest",
+        )?;
 
         // Build the extra header block.
         let mut hdr = String::new();
@@ -111,48 +125,47 @@ pub fn request(
         } else {
             format!("{}\0", hdr).encode_utf16().collect()
         };
-        let hdr_ptr = if hdr_w.is_empty() {
-            PCWSTR::null()
+        let hdr_slice: Option<&[u16]> = if hdr_w.is_empty() {
+            None
         } else {
-            PCWSTR(hdr_w.as_ptr())
+            Some(hdr_w.as_slice())
         };
 
         let opt_len = body.map(|b| b.len() as u32).unwrap_or(0);
-        let opt_ptr = body.map(|b| b.as_ptr()).unwrap_or(std::ptr::null());
+        let opt_ptr = body
+            .map(|b| b.as_ptr() as *const std::ffi::c_void)
+            .or_else(|| Some(std::ptr::null()));
 
-        WinHttpSendRequest(
-            req.0,
-            hdr_ptr,
-            hdr_w.len() as u32,
-            Some(opt_ptr),
-            opt_len,
-            0,
-            0,
-        )
-        .map_err(|e| format!("send failed: {e}"))?;
+        WinHttpSendRequest(req.0, hdr_slice, opt_ptr, opt_len, opt_len, 0)
+            .map_err(|e| format!("send failed: {e}"))?;
 
-        WinHttpReceiveResponse(req.0, None).map_err(|e| format!("no response: {e}"))?;
+        WinHttpReceiveResponse(req.0, std::ptr::null_mut())
+            .map_err(|e| format!("no response: {e}"))?;
 
         // Status code (best effort).
         let mut status: u32 = 0;
+        let mut status_len = std::mem::size_of::<u32>() as u32;
         let _ = WinHttpQueryHeaders(
             req.0,
-            (WINHTTP_QUERY_FLAG_NUMBER | 0x0000000F) as u32,
-            WINHTTP_HEADER_NAME_BY_INDEX,
-            Some(&mut status as *mut u32 as *mut _),
-            std::mem::size_of::<u32>() as u32,
-            Some(std::ptr::null_mut()),
-            Some(std::ptr::null_mut()),
+            WINHTTP_QUERY_FLAG_NUMBER | WINHTTP_QUERY_STATUS_CODE,
+            PCWSTR::null(),
+            Some(&mut status as *mut u32 as *mut std::ffi::c_void),
+            &mut status_len,
+            std::ptr::null_mut(),
         );
-        // 0x0F = WINHTTP_QUERY_STATUS_CODE
         let status = if status == 0 { 200 } else { status };
 
         let mut buf = Vec::new();
         let mut chunk = [0u8; 8192];
         loop {
             let mut read: u32 = 0;
-            let ok =
-                WinHttpReadData(req.0, chunk.as_mut_ptr(), chunk.len() as u32, &mut read).is_ok();
+            let ok = WinHttpReadData(
+                req.0,
+                chunk.as_mut_ptr() as *mut std::ffi::c_void,
+                chunk.len() as u32,
+                &mut read,
+            )
+            .is_ok();
             if !ok || read == 0 {
                 break;
             }

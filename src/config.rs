@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+#[derive(Clone)]
 pub struct Config {
     pub source_lang: String,
     pub target_lang: String,
@@ -24,17 +25,9 @@ impl Config {
         c
     }
 
+    /// Persist to disk. Reserved for a future settings UI.
+    #[allow(dead_code)]
     pub fn save(&self) {
-        let mut c = Self::default();
-        c.source_lang = self.source_lang.clone();
-        c.target_lang = self.target_lang.clone();
-        c.provider = self.provider.clone();
-        c.llm_endpoint = self.llm_endpoint.clone();
-        c.llm_model = self.llm_model.clone();
-        c.llm_key = self.llm_key.clone();
-        c.llm_style = self.llm_style.clone();
-        c.auto_lang = self.auto_lang;
-        c.region = self.region;
         let path = crate::util::config_path();
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -71,14 +64,16 @@ impl Config {
         if let Some(b) = get("auto_lang").and_then(|x| x.as_bool()) {
             self.auto_lang = b;
         }
-        if let Some(r) = get("region").and_then(|x| x.as_array()) {
-            if r.len() == 4 {
-                self.region = Some((
-                    r[0].as_i64().unwrap_or(0) as i32,
-                    r[1].as_i64().unwrap_or(0) as i32,
-                    r[2].as_i64().unwrap_or(0) as i32,
-                    r[3].as_i64().unwrap_or(0) as i32,
-                ));
+        if let Some(arr) = get("region") {
+            if let Some(r) = arr.as_array() {
+                if r.len() == 4 {
+                    self.region = Some((
+                        r[0].as_i64().unwrap_or(0) as i32,
+                        r[1].as_i64().unwrap_or(0) as i32,
+                        r[2].as_i64().unwrap_or(0) as i32,
+                        r[3].as_i64().unwrap_or(0) as i32,
+                    ));
+                }
             }
         }
         self
@@ -96,5 +91,28 @@ impl Config {
             auto_lang: true,
             region: None,
         }
+    }
+}
+
+impl serde::Serialize for Config {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut st = serializer.serialize_struct("Config", 9)?;
+        st.serialize_field("source_lang", &self.source_lang)?;
+        st.serialize_field("target_lang", &self.target_lang)?;
+        st.serialize_field("provider", &self.provider)?;
+        st.serialize_field("llm_endpoint", &self.llm_endpoint)?;
+        st.serialize_field("llm_model", &self.llm_model)?;
+        st.serialize_field("llm_key", &self.llm_key)?;
+        st.serialize_field("llm_style", &self.llm_style)?;
+        st.serialize_field("auto_lang", &self.auto_lang)?;
+        match self.region {
+            Some((x, y, w, h)) => st.serialize_field("region", &serde_json::json!([x, y, w, h]))?,
+            None => st.serialize_field("region", &Value::Null)?,
+        }
+        st.end()
     }
 }

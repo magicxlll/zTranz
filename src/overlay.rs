@@ -9,12 +9,12 @@ use std::cell::RefCell;
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetClientRect, GetDC, ReleaseDC,
-    SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
+    BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, RGBQUAD,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, PostMessageW, RegisterClassW, SetWindowPos, ShowWindow,
+    CreateWindowExW, DefWindowProcW, GetClientRect, RegisterClassW, SetWindowPos, ShowWindow,
     UpdateLayeredWindow, HWND_TOPMOST, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOW, ULW_ALPHA,
     WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
@@ -31,10 +31,17 @@ struct OverlayState {
 }
 
 thread_local! {
-    static STATE: RefCell<OverlayState> = const { RefCell::new(OverlayState { dragging: false, ..Default::default() }) };
+    static STATE: RefCell<OverlayState> = const {
+        RefCell::new(OverlayState {
+            start: (0, 0),
+            cur: (0, 0),
+            dragging: false,
+        })
+    };
     static INSTANCE_HWND: RefCell<HWND> = const { RefCell::new(HWND(std::ptr::null_mut())) };
 }
 
+#[derive(Clone)]
 pub struct Overlay {
     hwnd: HWND,
 }
@@ -96,16 +103,6 @@ impl Overlay {
             let _ = ShowWindow(self.hwnd, SW_SHOW);
             paint(self.hwnd);
         }
-    }
-
-    pub fn hide(&self) {
-        unsafe {
-            let _ = ShowWindow(self.hwnd, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
-        }
-    }
-
-    pub fn hwnd(&self) -> HWND {
-        self.hwnd
     }
 }
 
@@ -172,7 +169,8 @@ fn selection() -> (i32, i32, i32, i32) {
         let st = s.borrow();
         let (ax, ay) = st.start;
         let (bx, by) = st.cur;
-        (ax.min(bx), ay.min(by), ax.abs_diff(bx), ay.abs_diff(by))
+        let (w, h) = (ax.abs_diff(bx), ay.abs_diff(by));
+        (ax.min(bx), ay.min(by), w as i32, h as i32)
     })
 }
 
@@ -193,21 +191,18 @@ fn paint(hwnd: HWND) {
                 biHeight: -h,
                 biPlanes: 1,
                 biBitCount: 32,
-                biCompression: BI_RGB,
+                biCompression: BI_RGB.0,
                 ..Default::default()
             },
-            bmiColors: [0],
+            bmiColors: [RGBQUAD::default()],
         };
 
         let pixels = build_overlay_pixels(w, h, selection());
 
-        let hdc = match CreateCompatibleDC(None) {
-            Ok(dc) => dc,
-            Err(_) => return,
-        };
+        let hdc = CreateCompatibleDC(None);
         let mut bits: *mut u8 = std::ptr::null_mut();
         let hbm = match CreateDIBSection(
-            hdc,
+            Some(hdc),
             &bi,
             DIB_RGB_COLORS,
             &mut bits as *mut *mut u8 as *mut _,
@@ -216,11 +211,11 @@ fn paint(hwnd: HWND) {
         ) {
             Ok(b) => b,
             Err(_) => {
-                DeleteDC(hdc);
+                let _ = DeleteDC(hdc);
                 return;
             }
         };
-        let old = SelectObject(hdc, hbm);
+        let old = SelectObject(hdc, hbm.into());
         if !bits.is_null() {
             std::ptr::copy_nonoverlapping(pixels.as_ptr(), bits, pixels.len());
         }
@@ -231,20 +226,16 @@ fn paint(hwnd: HWND) {
             hwnd,
             None,
             None,
-            &size,
-            hdc,
-            &pos,
+            Some(&size),
+            Some(hdc),
+            Some(&pos),
             COLORREF(0xFF000000),
             None,
             ULW_ALPHA,
         );
-        let scr = GetDC(None);
-        if let Ok(dc) = scr {
-            let _ = ReleaseDC(None, dc);
-        }
         SelectObject(hdc, old);
-        DeleteObject(Some(&hbm));
-        DeleteDC(hdc);
+        let _ = DeleteObject(hbm.into());
+        let _ = DeleteDC(hdc);
     }
 }
 

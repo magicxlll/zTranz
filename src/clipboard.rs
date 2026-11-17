@@ -1,13 +1,20 @@
 //! Read the current clipboard text, and try to capture the user's
 //! text selection in the foreground app via UI Automation.
 
-use std::ffi::OsString;
-use std::os::windows::ffi::OsStringExt;
-use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Foundation::{HANDLE, HGLOBAL};
+use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 use windows::Win32::System::DataExchange::{
-    CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard, CF_UNICODETEXT,
+    CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    SetClipboardData,
 };
-use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock, HGLOBAL};
+use windows::Win32::System::Memory::{
+    GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GLOBAL_ALLOC_FLAGS,
+};
+use windows::Win32::System::Ole::CF_UNICODETEXT;
+use windows::Win32::UI::Accessibility::{
+    CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTextPattern,
+};
+use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
 /// Get the clipboard's current text, if any.
 pub fn get_text() -> Option<String> {
@@ -16,13 +23,13 @@ pub fn get_text() -> Option<String> {
             return None;
         }
         let _guard = ClipboardGuard;
-        if IsClipboardFormatAvailable(CF_UNICODETEXT).is_err() {
+        if IsClipboardFormatAvailable(CF_UNICODETEXT.0 as u32).is_err() {
             return None;
         }
-        let h = GetClipboardData(CF_UNICODETEXT).ok()?;
-        let h = HGLOBAL(h.0);
-        let size = GlobalSize(h) as usize;
-        let ptr = GlobalLock(h) as *const u16;
+        let h = GetClipboardData(CF_UNICODETEXT.0 as u32).ok()?;
+        let hg = HGLOBAL(h.0);
+        let size = GlobalSize(hg) as usize;
+        let ptr = GlobalLock(hg) as *const u16;
         if ptr.is_null() || size == 0 {
             return None;
         }
@@ -31,7 +38,7 @@ pub fn get_text() -> Option<String> {
         let slice = std::slice::from_raw_parts(ptr, max);
         let len = slice.iter().position(|&c| c == 0).unwrap_or(max);
         let text = String::from_utf16_lossy(&slice[..len]);
-        let _ = GlobalUnlock(h);
+        let _ = GlobalUnlock(hg);
         if text.trim().is_empty() {
             None
         } else {
@@ -57,14 +64,11 @@ pub fn set_text(text: &str) -> bool {
             return false;
         }
         let _guard = ClipboardGuard;
-        let _ = windows::Win32::System::DataExchange::EmptyClipboard();
+        let _ = EmptyClipboard();
         let mut wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
         let bytes = wide.len() * 2;
-        let hg = windows::Win32::System::Memory::GlobalAlloc(
-            windows::Win32::System::Memory::GLOBAL_ALLOC_FLAGS(0x0042), // GMEM_MOVEABLE | GMEM_ZEROINIT
-            bytes,
-        );
-        let hg = match hg {
+        let flags = GLOBAL_ALLOC_FLAGS(0x0042); // GMEM_MOVEABLE | GMEM_ZEROINIT
+        let hg = match GlobalAlloc(flags, bytes) {
             Ok(h) => h,
             Err(_) => return false,
         };
@@ -74,11 +78,7 @@ pub fn set_text(text: &str) -> bool {
         }
         std::ptr::copy_nonoverlapping(wide.as_mut_ptr(), dst, wide.len());
         let _ = GlobalUnlock(hg);
-        let ok = windows::Win32::System::DataExchange::SetClipboardData(
-            CF_UNICODETEXT,
-            Some(HANDLE(hg.0)),
-        )
-        .is_ok();
+        let ok = SetClipboardData(CF_UNICODETEXT.0 as u32, Some(HANDLE(hg.0))).is_ok();
         ok
     }
 }
@@ -89,66 +89,59 @@ pub fn set_text(text: &str) -> bool {
 /// players, or apps that block accessibility).
 pub fn get_selection() -> Option<String> {
     unsafe {
-        use windows::Win32::UI::Accessibility::{
-            IUIAutomationElement, UIA_IsTextPatternAvailablePropertyId, UIA_TextPatternId,
-        };
-        use windows::Win32::UI::WindowsAndMessaging::{
-            GetForegroundWindow, GetWindowThreadProcessId,
-        };
-
         let hwnd = GetForegroundWindow();
         if hwnd.0.is_null() {
             return None;
         }
         let mut pid = 0u32;
-        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        let _ = GetWindowThreadProcessId(hwnd, Some(&mut pid));
 
-        let auto = IUIAutomationElement::RootElement().ok()?;
-        let cond = auto
-            .CreatePropertyCondition(
-                UIA_IsTextPatternAvailablePropertyId,
-                windows::core::VARIANT::from(true),
-            )
-            .ok()?;
-        let _ = &cond;
-        let el = auto.ElementFromHandle(hwnd).ok()?;
-        let _ = &el;
+        let auto: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL).ok()?;
+        let root = auto.GetRootElement().ok()?;
+        let _ = &root;
 
         // Walk down from the focused element to find a text pattern with a selection.
         if let Ok(focused) = auto.GetFocusedElement() {
             if let Some(t) = selection_from(&focused) {
                 return Some(t);
             }
-            let mut walker = focused.ControlViewWalker().ok()?;
-            let mut child = walker.GetFirstChildElement().ok()?;
+            let walker = auto.ControlViewWalker().ok()?;
+            let mut child = walker.GetFirstChildElement(&focused).ok()?;
             let mut guard = 0;
-            while child.is_some() && guard < 64 {
-                if let Some(t) = selection_from(&child.unwrap()) {
+            loop {
+                if let Some(t) = selection_from(&child) {
                     return Some(t);
                 }
-                child = walker.GetNextSiblingElement().ok()?;
+                child = match walker.GetNextSiblingElement(&child).ok() {
+                    Some(c) => c,
+                    None => break,
+                };
                 guard += 1;
+                if guard >= 64 {
+                    break;
+                }
             }
         }
         None
     }
 }
 
-unsafe fn selection_from(
-    el: &windows::Win32::UI::Accessibility::IUIAutomationElement,
-) -> Option<String> {
-    use windows::Win32::UI::Accessibility::{IUIAutomationTextPattern, UIA_TextPatternId};
-    let pat = el.GetCurrentPattern(UIA_TextPatternId).ok()?;
-    let tp: IUIAutomationTextPattern = pat.cast()?;
-    let sel = tp.GetSelection().ok()?;
-    if sel.Length() == 0 {
+unsafe fn selection_from(el: &IUIAutomationElement) -> Option<String> {
+    use windows::Win32::UI::Accessibility::UIA_TextPatternId;
+    let pattern = el
+        .GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId)
+        .ok()?;
+    let sel = pattern.GetSelection().ok()?;
+    let len = sel.Length().ok()?;
+    if len == 0 {
         return None;
     }
     let mut out = String::new();
-    for i in 0..sel.Length() {
+    for i in 0..len {
         let r = sel.GetElement(i).ok()?;
-        let t = r.CurrentName().ok()?;
-        out.push_str(&t);
+        // Take up to 32k chars per range — far more than any real selection.
+        let t = r.GetText(32767).ok()?;
+        out.push_str(&String::from_utf16_lossy(t.as_ref()));
     }
     let out = out.trim().to_string();
     if out.is_empty() {
@@ -156,9 +149,4 @@ unsafe fn selection_from(
     } else {
         Some(out)
     }
-}
-
-/// Utility for building wide strings from OsString-ish values.
-pub fn to_wide(s: &OsString) -> Vec<u16> {
-    s.clone().encode_wide().chain(std::iter::once(0)).collect()
 }

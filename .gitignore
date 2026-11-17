@@ -1,5 +1,6 @@
 # Build output
 /target
+/artifacts
 
 # Local logs & temp
 *.log

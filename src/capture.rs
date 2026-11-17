@@ -4,9 +4,11 @@
 use std::path::Path;
 use windows::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC,
-    SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, SRCCOPY,
+    SelectObject, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, SRCCOPY,
 };
-use windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics;
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct ScreenGeometry {
@@ -20,10 +22,10 @@ pub struct ScreenGeometry {
 pub fn virtual_screen() -> ScreenGeometry {
     unsafe {
         ScreenGeometry {
-            x: GetSystemMetrics(76).try_into().unwrap_or(0), // SM_XVIRTUALSCREEN
-            y: GetSystemMetrics(77).try_into().unwrap_or(0), // SM_YVIRTUALSCREEN
-            width: GetSystemMetrics(78).try_into().unwrap_or(1920), // SM_CXVIRTUALSCREEN
-            height: GetSystemMetrics(79).try_into().unwrap_or(1080), // SM_CYVIRTUALSCREEN
+            x: GetSystemMetrics(SM_XVIRTUALSCREEN),
+            y: GetSystemMetrics(SM_YVIRTUALSCREEN),
+            width: GetSystemMetrics(SM_CXVIRTUALSCREEN),
+            height: GetSystemMetrics(SM_CYVIRTUALSCREEN),
         }
     }
 }
@@ -43,39 +45,34 @@ pub fn grab_virtual_screen() -> Result<RawScreen, String> {
     let (w, h) = (geom.width, geom.height);
 
     unsafe {
-        let src = GetDC(None).ok_or("GetDC failed")?;
-        let mem = CreateCompatibleDC(&src).ok_or("CreateCompatibleDC failed")?;
+        let src = GetDC(None);
+        let mem = CreateCompatibleDC(Some(src)); // mem DC for the DIB
 
-        let bi = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: w,
-                biHeight: -(h as i32), // top-down
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB,
-                biSizeImage: 0,
-                biXPelsPerMeter: 0,
-                biYPelsPerMeter: 0,
-                biClrUsed: 0,
-                biClrImportant: 0,
-            },
-            bmiColors: [0],
+        let mut bi = BITMAPINFO::default();
+        bi.bmiHeader = BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: w,
+            biHeight: -(h as i32), // top-down
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: 0, // BI_RGB
+            ..Default::default()
         };
 
         let mut bits: *mut u8 = std::ptr::null_mut();
         let hbm = CreateDIBSection(
-            mem,
+            Some(mem),
             &bi,
             DIB_RGB_COLORS,
             &mut bits as *mut *mut u8 as *mut _,
             None,
             0,
         )
-        .ok_or("CreateDIBSection failed")?;
+        .map_err(|e| format!("CreateDIBSection failed: {e}"))?;
 
-        let old = SelectObject(mem, hbm);
-        BitBlt(mem, 0, 0, w, h, Some(&src), geom.x, geom.y, SRCCOPY);
+        let old = SelectObject(mem, hbm.into());
+        BitBlt(mem, 0, 0, w, h, Some(src), geom.x, geom.y, SRCCOPY)
+            .map_err(|e| format!("BitBlt screen capture failed: {e}"))?;
 
         let total = (w as usize) * (h as usize) * 4;
         let bgra = if bits.is_null() {
@@ -85,8 +82,8 @@ pub fn grab_virtual_screen() -> Result<RawScreen, String> {
         };
 
         SelectObject(mem, old);
-        DeleteObject(Some(&hbm));
-        DeleteDC(mem);
+        let _ = DeleteObject(hbm.into());
+        let _ = DeleteDC(mem);
         ReleaseDC(None, src);
 
         if bgra.is_empty() {
@@ -132,10 +129,11 @@ pub fn crop_to_png(
         }
     }
 
-    let img = image::RgbaImage::from_raw(cw, ch, &rgba).ok_or("bad pixel buffer")?;
-    let file = std::io::BufWriter::new(
+    let img = image::RgbaImage::from_raw(cw, ch, rgba).ok_or("bad pixel buffer")?;
+    let mut file = std::io::BufWriter::new(
         std::fs::File::create(out).map_err(|e| format!("create {}: {}", out.display(), e))?,
     );
-    img.write_to(file).map_err(|e| format!("encode png: {e}"))?;
+    img.write_to(&mut file, image::ImageFormat::Png)
+        .map_err(|e| format!("encode png: {e}"))?;
     Ok(())
 }

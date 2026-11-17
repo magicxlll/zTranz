@@ -371,6 +371,9 @@ name = "ztranz"
 version = "0.1.0"
 dependencies = [
  "image",
+ "serde",
  "serde_json",
  "windows",
+ "windows-collections",
+ "windows-future",
 ]

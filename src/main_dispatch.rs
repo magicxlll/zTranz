@@ -58,8 +58,9 @@ pub fn on_translate_requested() {
 /// Triggered by the tray menu / hotkey: open the region-select overlay.
 pub fn on_capture_requested() {
     let geom = crate::capture::virtual_screen();
+    // Copy the overlay out atomically (static mut cannot be shared-referenced).
     unsafe {
-        if let Some(o) = OVERLAY.as_ref() {
+        if let Some(o) = std::ptr::read(&raw const OVERLAY) {
             o.show(&geom);
             state::set_status("Drag to select a region…");
         }
@@ -68,7 +69,9 @@ pub fn on_capture_requested() {
 
 pub fn on_quit_requested() {
     QUIT.store(true, Ordering::SeqCst);
-    windows::Win32::UI::WindowsAndMessaging::PostQuitMessage(0);
+    unsafe {
+        windows::Win32::UI::WindowsAndMessaging::PostQuitMessage(0);
+    }
 }
 
 // ---------------------------------------------------------------- jobs

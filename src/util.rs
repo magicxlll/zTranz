@@ -7,10 +7,6 @@ pub fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-pub fn wide_of(s: &str) -> Vec<u16> {
-    s.encode_utf16().collect()
-}
-
 /// Percent-encode for URL query strings (UTF-8).
 pub fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -46,10 +42,14 @@ pub fn temp_dir() -> PathBuf {
 pub fn log(msg: &str) {
     let line = format!("[zTranz] {}\n", msg);
     use std::io::Write;
+    let log_path = config_path().with_file_name("ztranz.log");
+    if let Some(parent) = log_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(config_path().with_file_name("ztranz.log"))
+        .open(&log_path)
     {
         let _ = f.write_all(line.as_bytes());
     }

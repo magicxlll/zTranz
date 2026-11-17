@@ -15,7 +15,10 @@ pub static STATUS_DIRTY: AtomicBool = AtomicBool::new(false);
 pub static CONTENT: Mutex<Option<PopupContent>> = Mutex::new(None);
 
 /// The last status string for the tray tooltip.
-pub static STATUS: Mutex<String> = Mutex::new(String::from("zTranz — ready"));
+///
+/// Initialized empty; `set_status` populates it. (`String::from` is not a
+/// const fn, so it cannot be used in a `static` initializer.)
+pub static STATUS: Mutex<String> = Mutex::new(String::new());
 
 /// Monotonic counter used to know the newest request wins.
 pub static REQUEST_ID: AtomicU64 = AtomicU64::new(0);
